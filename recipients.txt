@@ -1,0 +1,13 @@
+# Genie Code PM Morning Brief — Recipients
+# ─────────────────────────────────────────
+# One email address per line.
+# Lines starting with # are comments and are ignored.
+# To temporarily pause a recipient without deleting them, add a - prefix:
+#   -paused@example.com
+#
+# Manage with:
+#   python3 manage.py list
+#   python3 manage.py add name@example.com
+#   python3 manage.py remove name@example.com
+
+itayeltahan1@gmail.com

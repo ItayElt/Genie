@@ -1,0 +1,45 @@
+name: Genie Code PM Morning Brief
+
+on:
+  schedule:
+    # 8:00 AM Pacific (UTC-7 summer / UTC-8 winter)
+    # Adjust the hour as needed: 15 = 8am PDT, 16 = 8am PST
+    - cron: "0 15 * * 1-5"  # Mon–Fri at 8am PDT
+
+  workflow_dispatch:  # Allow manual trigger from GitHub UI
+
+jobs:
+  send-brief:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Generate and send brief
+        env:
+          ANTHROPIC_API_KEY:   ${{ secrets.ANTHROPIC_API_KEY }}
+          TAVILY_API_KEY:      ${{ secrets.TAVILY_API_KEY }}
+          SENDGRID_API_KEY:    ${{ secrets.SENDGRID_API_KEY }}
+          SENDER_EMAIL:        ${{ secrets.SENDER_EMAIL }}
+          RECIPIENT_EMAILS:    ${{ secrets.RECIPIENT_EMAILS }}
+          UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
+          SMTP_USER:           ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD:       ${{ secrets.SMTP_PASSWORD }}
+        run: python main.py
+
+      - name: Upload HTML artifact (for debugging)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: brief-html
+          path: logs/brief_*.html
+          retention-days: 7

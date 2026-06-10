@@ -1,0 +1,23 @@
+# Secrets — never commit
+.env
+
+# Runtime state & logs
+logs/
+state/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+.pyenv/
+
+# macOS
+.DS_Store
+
+# Editor
+.idea/
+.vscode/
+pyrightconfig.json
