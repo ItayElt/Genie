@@ -46,7 +46,9 @@ def _story_card(story: Dict[str, Any]) -> str:
     )
     sources_html = " &nbsp;·&nbsp; ".join(
         f'<a href="{s["url"]}" style="color:#2563EB;text-decoration:none;font-size:12px;'
-        f'font-family:{_FONT}">{s["title"]}</a>'
+        f'font-family:{_FONT}">{s["title"]}'
+        + (f' ({s["date"]})' if s.get("date") else "")
+        + "</a>"
         for s in story.get("sources", []) if s.get("url")
     )
 
@@ -183,6 +185,40 @@ def build_html(newsletter: Dict[str, Any]) -> str:
   <ul style="margin:0;padding-left:18px">{items}</ul>
 </div>"""
 
+    # Community Sentiment (Fridays only)
+    cs_html = ""
+    cs_items = newsletter.get("community_sentiment", [])
+    if cs_items:
+        def _cs_card(item: Dict[str, Any]) -> str:
+            url = item.get("url", "")
+            platform = item.get("platform", "")
+            engagement = item.get("engagement", "")
+            summary = item.get("summary", "")
+            header_line = f"{platform}"
+            if engagement:
+                header_line += f" &nbsp;·&nbsp; {engagement}"
+            link_html = (
+                f' <a href="{url}" style="color:#065F46;font-size:12px;text-decoration:none;'
+                f'font-family:{_FONT}">→</a>'
+                if url else ""
+            )
+            return f"""
+<div style="border-left:3px solid #059669;padding:11px 15px;margin-bottom:12px;
+            background:#ECFDF5;border-radius:0 4px 4px 0">
+  <div style="font-weight:700;color:#065F46;font-size:13px;margin-bottom:4px;
+              font-family:{_FONT}">{header_line}{link_html}</div>
+  <p style="margin:0;color:#333333;font-size:15px;line-height:1.6;font-family:{_FONT}">{summary}</p>
+</div>"""
+
+        cards = "".join(_cs_card(c) for c in cs_items)
+        cs_html = f"""
+<div style="margin:32px 0 0">
+  <div style="font-size:11px;font-weight:700;letter-spacing:1.8px;text-transform:uppercase;
+              color:#111111;margin-bottom:16px;padding-bottom:8px;border-bottom:2px solid #059669;
+              font-family:{_FONT}">Community Sentiment</div>
+  {cards}
+</div>"""
+
     # Good morning — bold only the opening phrase (first sentence), rest normal
     gm_raw = newsletter.get("good_morning", "").strip()
     first_dot = gm_raw.find(". ")
@@ -256,6 +292,7 @@ def build_html(newsletter: Dict[str, Any]) -> str:
       {comp_html}
       {qh_html}
       {obs_html}
+      {cs_html}
     </div>
 
   </div>

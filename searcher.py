@@ -1,10 +1,11 @@
 """
 Multi-source signal collector.
 Strategy:
-  1. Parse RSS feeds from Tier 0–3 sources (free, reliable, no rate limits).
-  2. Run targeted Tavily searches for Tier 2–8 sources and community signals.
-  3. Deduplicate by URL.
-  4. Filter out URLs already featured in recent briefs (via state.py).
+  1. Parse RSS feeds from Tier 1 sources (conversational analytics competitors).
+  2. Run targeted Tavily searches for broader coverage and NL-to-SQL benchmarks.
+  3. On Fridays: scan HN/Reddit for high-engagement community discussion.
+  4. Deduplicate by URL.
+  5. Filter out URLs already featured in recent briefs (via state.py).
 """
 
 import logging
@@ -18,78 +19,133 @@ from config import TAVILY_API_KEY, LOOKBACK_HOURS
 
 logger = logging.getLogger(__name__)
 
-# Current month/year for dynamic queries — updated each run
 _NOW = datetime.now()
 _MONTH_YEAR = _NOW.strftime("%B %Y")      # e.g. "June 2026"
+_IS_FRIDAY = _NOW.weekday() == 4
 
 
-# ── RSS FEEDS  (Tier 0–3, always scraped) ───────────────────────────────────
+# -- RSS FEEDS  (Tier 1 = conversational analytics competitors, always scraped) ----
 
 RSS_FEEDS: Dict[str, str] = {
-    # Tier 0 – Databricks
-    "Databricks Blog":          "https://www.databricks.com/feed",
-    "Databricks Engineering":   "https://www.databricks.com/blog/engineering/feed",
-
-    # Tier 1 – Direct data platform competitors
+    # Tier 1 -- Direct NL-to-SQL / conversational analytics competitors
     "Snowflake Blog":           "https://www.snowflake.com/blog/feed/",
     "Microsoft AI Blog":        "https://blogs.microsoft.com/ai/feed/",
     "Microsoft Fabric":         "https://community.fabric.microsoft.com/t5/s/gxcuf89792/rss/board?board.id=FabricUpdates",
-    "ClickHouse Blog":          "https://clickhouse.com/blog/rss.xml",
-    "MongoDB Blog":             "https://www.mongodb.com/developer/feed.xml",
-    "Trino Blog":               "https://trino.io/feed.xml",
+    "Google Cloud AI":          "https://cloud.google.com/feeds/gcp-blog-topics-ai-machine-learning.xml",
+    "Google Cloud Blog":        "https://cloud.google.com/feeds/gcp-blog-topics-databases.xml",
+    "ThoughtSpot Blog":         "https://www.thoughtspot.com/blog/rss.xml",
+    "Hex Blog":                 "https://hex.tech/blog/rss.xml",
+    "AWS ML Blog":              "https://aws.amazon.com/blogs/machine-learning/feed/",
+    "AWS Big Data Blog":        "https://aws.amazon.com/blogs/big-data/feed/",
 
-    # Tier 2 – AI coding agents
+    # Tier 1 -- Databricks (context only, never standalone Genie Code)
+    "Databricks Blog":          "https://www.databricks.com/feed",
+    "Databricks Engineering":   "https://www.databricks.com/blog/engineering/feed",
+
+    # Tier 2 -- AI coding agents (data-context only)
     "GitHub Blog":              "https://github.blog/feed/",
     "GitHub Changelog":         "https://github.blog/changelog/feed/",
     "Anthropic Blog":           "https://www.anthropic.com/rss.xml",
     "OpenAI Blog":              "https://openai.com/news/rss.xml",
     "Cursor Blog":              "https://cursor.com/blog/rss.xml",
 
-    # Tier 3 – Foundation models
+    # Tier 3 -- Foundation models (quick hits only)
     "Google DeepMind":          "https://deepmind.google/discover/blog/rss.xml",
     "Meta AI Blog":             "https://ai.meta.com/blog/rss/",
     "NVIDIA Blog":              "https://blogs.nvidia.com/feed/",
 
-    # Tier 4 – Agent frameworks
+    # Agent frameworks (data workflow context)
     "LangChain Blog":           "https://blog.langchain.dev/rss/",
 
-    # Tier 5 – Infrastructure
-    "AWS ML Blog":              "https://aws.amazon.com/blogs/machine-learning/feed/",
-    "AWS Big Data Blog":        "https://aws.amazon.com/blogs/big-data/feed/",
-    "Google Cloud AI":          "https://cloud.google.com/feeds/gcp-blog-topics-ai-machine-learning.xml",
-    "Google Cloud Blog":        "https://cloud.google.com/feeds/gcp-blog-topics-databases.xml",
+    # Data ecosystem
+    "ClickHouse Blog":          "https://clickhouse.com/blog/rss.xml",
+    "MongoDB Blog":             "https://www.mongodb.com/developer/feed.xml",
+    "Trino Blog":               "https://trino.io/feed.xml",
     "Vercel Blog":              "https://vercel.com/atom",
 
-    # Tier 7 – Community (high-signal, filtered by Claude)
+    # Community (high-engagement signals only -- Claude filters by pillar relevance)
     "Hacker News Front Page":   "https://hnrss.org/frontpage",
     "Hacker News Best":         "https://hnrss.org/best",
 }
 
-# ── TAVILY QUERIES  (dynamic dates, Tier 2–8) ───────────────────────────────
+
+# -- TAVILY QUERIES  (full list -- budget mode: set TAVILY_BUDGET=1 in .env to use 8) ----
 
 def _tavily_queries() -> List[str]:
-    """Build queries with the current month/year so they never go stale."""
+    """
+    Full 29-query list (30 credits/day, 870/month -- fits free tier of 1,000).
+    In budget mode (8 queries) comment block is active to cut to top-value queries only.
+    """
     my = _MONTH_YEAR  # "June 2026"
-    # BUDGET MODE: 8 queries/day to preserve remaining free-tier credits.
-    # Switch back to full 29-query list next month when quota resets.
-    return [
-        # Top competitors (highest value per credit)
-        f"Snowflake Cortex AI data platform announcement {my}",
-        f"Microsoft Fabric AI data agent update {my}",
-        f"AWS SageMaker Redshift Glue data platform AI update {my}",
-        f"Google BigQuery Vertex AI update {my}",
-        f"Palantir AIP Foundry enterprise AI {my}",
 
-        # AI coding agents
-        f"Cursor Claude Code GitHub Copilot agent update {my}",
-        f"OpenAI Anthropic model release announcement {my}",
+    # BUDGET MODE: uncomment this block and comment out the full list below
+    # return [
+    #     f"Snowflake Cortex Analyst NL-to-SQL conversational analytics {my}",
+    #     f"Microsoft Fabric Copilot Power BI AI data agent {my}",
+    #     f"Google BigQuery Gemini data agent NL-to-SQL {my}",
+    #     f"ThoughtSpot Sigma Omni Looker conversational BI update {my}",
+    #     f"AWS QuickSight Q Bedrock agents data analytics {my}",
+    #     f"Hex Magic AI notebook data agent {my}",
+    #     f"NL-to-SQL text-to-SQL benchmark BIRD Spider arXiv {my}",
+    #     f"Tableau Salesforce Agentforce analytics AI agent {my}",
+    # ]
+
+    return [
+        # Tier 1 -- Conversational analytics / NL-to-SQL direct competitors
+        f"Snowflake Cortex Analyst Intelligence NL-to-SQL conversational analytics {my}",
+        f"Microsoft Fabric Copilot Power BI natural language data agent {my}",
+        f"Google BigQuery Gemini data agent NL-to-SQL conversational {my}",
+        f"ThoughtSpot Sage AI natural language analytics update {my}",
+        f"Sigma Computing AI analytics agent update {my}",
+        f"Omni Analytics AI conversational BI update {my}",
+        f"Looker conversational analytics natural language update {my}",
+        f"Tableau Next Salesforce Agentforce analytics AI agent {my}",
+        f"Hex Magic AI notebook data agent update {my}",
+        f"AWS Q QuickSight Bedrock data analytics agent {my}",
+
+        # Tier 1 -- Other data platforms with NL/agent features
+        f"Palantir AIP Foundry data agent NL query {my}",
+        f"Databricks Delta Lake Unity Catalog MLflow platform update {my}",
+        f"Databricks partnership acquisition pricing enterprise announcement {my}",
+        f"ClickHouse Starburst Dremio data lakehouse AI query {my}",
+        f"dbt Labs semantic layer natural language data transformation {my}",
+
+        # Tier 2 -- AI coding agents (data context only)
+        f"GitHub Copilot SQL data agent update {my}",
+        f"Cursor AI SQL data workflow update {my}",
+        f"Claude Code Anthropic data SQL agent update {my}",
+        f"OpenAI Codex Windsurf Devin data agent SQL {my}",
+
+        # Tier 3 -- Foundation models (only if text-to-SQL relevant)
+        f"OpenAI model SQL code generation benchmark {my}",
+        f"Anthropic Claude model SQL code latency pricing {my}",
+        f"Google Gemini model SQL code generation update {my}",
+        f"Meta Llama model SQL code generation release {my}",
+
+        # Benchmarks and research (mandatory scan)
+        f"NL-to-SQL text-to-SQL BIRD Spider 2.0 benchmark leaderboard {my}",
+        f"NL-to-SQL agentic data analysis arXiv research {my}",
+        f"LLM SQL code generation benchmark arXiv {my}",
+
+        # Agent frameworks
+        f"LangGraph LangChain CrewAI LlamaIndex data workflow agent {my}",
 
         # Data ecosystem
-        f"Apache Spark Iceberg dbt data engineering release {my}",
+        f"Apache Iceberg Delta Lake open table format release {my}",
+        f"Fivetran Airbyte data integration pipeline announcement {my}",
     ]
 
 
-# Domains blocked from appearing as signals — low-quality, user-generated, or irrelevant
+def _friday_community_queries() -> List[str]:
+    """Friday-only: scan for high-engagement community discussion."""
+    my = _MONTH_YEAR
+    return [
+        f"Genie Code Cortex Analyst Fabric Copilot conversational BI community discussion {my}",
+        f"natural language SQL data analyst AI tool Hacker News Reddit discussion {my}",
+    ]
+
+
+# Domains blocked from appearing as signals
 _BLOCKED_DOMAINS = {
     # Content farms / regional blogs
     "techafricanews.com", "analyticsvidhya.com", "towardsdatascience.com",
@@ -98,12 +154,11 @@ _BLOCKED_DOMAINS = {
     # Personal / community platforms
     "medium.com", "substack.com", "dev.to", "hashnode.com", "beehiiv.com",
     "ghost.io", "blogspot.com", "wordpress.com",
-    # Social / forums
-    "reddit.com", "news.ycombinator.com", "twitter.com", "x.com",
-    "linkedin.com", "facebook.com", "quora.com",
+    # Social / forums (HN/Reddit allowed only via RSS with engagement filter in Claude)
+    "twitter.com", "x.com", "linkedin.com", "facebook.com", "quora.com",
     # Video (description scrapes)
     "youtube.com", "youtu.be",
-    # Generic "strategy" / SEO content sites
+    # Generic SEO content sites
     "strategy.com", "simplilearn.com", "coursera.org", "udemy.com",
     "oreilly.com", "dzone.com", "intellipaat.com",
 }
@@ -118,7 +173,7 @@ def _is_blocked(url: str) -> bool:
         return False
 
 
-# ── Helpers ──────────────────────────────────────────────────────────────────
+# -- Helpers -------------------------------------------------------------------
 
 def _cutoff() -> datetime:
     return datetime.now(timezone.utc) - timedelta(hours=LOOKBACK_HOURS)
@@ -137,16 +192,19 @@ def _parse_date(entry) -> datetime:
 
 def _source_tier(name: str) -> int:
     tiers = [
-        (0, ["Databricks"]),
-        (1, ["Snowflake", "Microsoft Fabric", "Microsoft AI",
-             "Palantir", "Cloudera", "Dremio", "Starburst", "ClickHouse",
-             "Teradata", "Oracle", "IBM", "SAP", "MongoDB", "Hex", "Deepnote",
-             "Trino", "Presto", "Redshift", "BigQuery", "Vertex AI",
-             "SageMaker", "Glue", "Synapse", "Apache Flink", "Apache Spark"]),
-        (2, ["GitHub", "Cursor", "Anthropic", "OpenAI", "Claude", "Windsurf", "Gemini", "Kiro", "Codex"]),
+        (1, ["Snowflake", "Microsoft Fabric", "Microsoft AI", "ThoughtSpot", "Sigma",
+             "Omni", "Looker", "Tableau", "Salesforce", "Hex", "QuickSight",
+             "BigQuery", "Vertex AI", "Gemini", "Palantir", "Bedrock",
+             "Fabric", "Power BI"]),
+        (0, ["Databricks"]),  # tier 0 for sorting but treated as context-only in prompt
+        (2, ["GitHub", "Cursor", "Anthropic", "OpenAI", "Claude", "Windsurf",
+             "Devin", "Codex"]),
         (3, ["DeepMind", "Meta AI", "NVIDIA", "Llama"]),
         (4, ["LangChain", "LangGraph", "LlamaIndex", "CrewAI", "AutoGen"]),
-        (5, ["AWS", "Google Cloud", "Vercel", "Cloudflare"]),
+        (5, ["AWS", "Google Cloud", "Vercel", "ClickHouse", "MongoDB", "Trino",
+             "dbt", "Fivetran", "Airbyte", "Iceberg", "Cloudera", "Dremio",
+             "Starburst", "SageMaker", "Glue", "Redshift",
+             "Apache Flink", "Apache Spark"]),
     ]
     for tier, keywords in tiers:
         if any(k in name for k in keywords):
@@ -154,7 +212,7 @@ def _source_tier(name: str) -> int:
     return 7
 
 
-# ── RSS fetcher ───────────────────────────────────────────────────────────────
+# -- RSS fetcher ---------------------------------------------------------------
 
 def fetch_rss_signals() -> List[Dict[str, Any]]:
     cutoff = _cutoff()
@@ -187,30 +245,32 @@ def fetch_rss_signals() -> List[Dict[str, Any]]:
     return signals
 
 
-# ── Tavily search ─────────────────────────────────────────────────────────────
+# -- Tavily search -------------------------------------------------------------
 
-def fetch_tavily_signals() -> List[Dict[str, Any]]:
+def fetch_tavily_signals(extra_queries: List[str] | None = None) -> List[Dict[str, Any]]:
     if not TAVILY_API_KEY:
-        logger.warning("TAVILY_API_KEY not set — skipping web search")
+        logger.warning("TAVILY_API_KEY not set -- skipping web search")
         return []
 
     try:
         from tavily import TavilyClient
     except ImportError:
-        logger.error("tavily-python not installed — run: pip install tavily-python")
+        logger.error("tavily-python not installed -- run: pip install tavily-python")
         return []
 
     client = TavilyClient(api_key=TAVILY_API_KEY)
     signals: List[Dict[str, Any]] = []
     seen: set = set()
 
-    for query in _tavily_queries():
+    all_queries = _tavily_queries() + (extra_queries or [])
+
+    for query in all_queries:
         try:
             result = client.search(
                 query=query,
                 search_depth="basic",
                 max_results=5,
-                days=2,           # only results from the past 2 days
+                days=2,
                 include_answer=False,
             )
             for r in result.get("results", []):
@@ -230,22 +290,26 @@ def fetch_tavily_signals() -> List[Dict[str, Any]]:
         except Exception as e:
             logger.warning(f"Tavily failed for '{query[:50]}': {e}")
 
-    logger.info(f"Tavily: {len(signals)} signals from {len(_tavily_queries())} queries")
+    logger.info(f"Tavily: {len(signals)} signals from {len(all_queries)} queries")
     return signals
 
 
-# ── Public API ────────────────────────────────────────────────────────────────
+# -- Public API ----------------------------------------------------------------
 
 def collect_all_signals() -> List[Dict[str, Any]]:
     """
     Collect, deduplicate, filter previously-seen stories,
     and return up to 120 fresh signals sorted by tier then recency.
     Only signals from the past 48 hours are included.
+    On Fridays, adds community sentiment queries.
     """
     rss = fetch_rss_signals()
-    web = fetch_tavily_signals()
 
-    # Hard 48-hour freshness cutoff — drop anything older regardless of source
+    # On Fridays, add community-sentiment queries to the Tavily call
+    friday_extras = _friday_community_queries() if _IS_FRIDAY else []
+    web = fetch_tavily_signals(extra_queries=friday_extras)
+
+    # Hard 48-hour freshness cutoff
     cutoff_48h = datetime.now(timezone.utc) - timedelta(hours=48)
     fresh_rss_web = []
     dropped = 0
@@ -279,9 +343,9 @@ def collect_all_signals() -> List[Dict[str, Any]]:
     except Exception as e:
         logger.warning(f"State filter skipped: {e}")
 
-    # Sort: tier ASC (0 = most important), then published DESC
+    # Sort: tier ASC (1 = most important for our purposes), then published DESC
     unique.sort(key=lambda s: (s.get("tier", 9), ""), reverse=False)
     unique.sort(key=lambda s: s.get("published", ""), reverse=True)
 
-    logger.info(f"Total fresh signals: {len(unique)}")
+    logger.info(f"Total fresh signals: {len(unique)} (Friday community scan: {_IS_FRIDAY})")
     return unique[:120]
